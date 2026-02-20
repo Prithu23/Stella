@@ -1,6 +1,6 @@
 // ── CONFIG ────────────────────────────────────────────────
 const API_KEY = 'ecmyfaicnzwwdmah';
-const BASE_URL = 'https://corsproxy.io/?https://nova.astrometry.net/api';
+const BASE_URL = 'http://127.0.0.1:5000';
 
 // ── STAR PARALLAX BACKGROUND ──────────────────────────────
 const canvas = document.getElementById('starCanvas');
@@ -80,13 +80,36 @@ let uploadedFile = null;
 function previewImage(event) {
   const file = event.target.files[0];
   if (!file) return;
-  uploadedFile = file;
+
   const reader = new FileReader();
   reader.onload = function(e) {
-    document.getElementById('previewImg').src = e.target.result;
-    document.getElementById('preview').style.display = 'block';
-    document.getElementById('analyzeBtn').style.display = 'inline-block';
-    setStatus('');
+    const img = new Image();
+    img.onload = function() {
+      const canvas = document.createElement('canvas');
+      const maxSize = 1000;
+      let w = img.width;
+      let h = img.height;
+
+      if (w > maxSize || h > maxSize) {
+        if (w > h) { h = (h / w) * maxSize; w = maxSize; }
+        else { w = (w / h) * maxSize; h = maxSize; }
+      }
+
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+
+      canvas.toBlob(blob => {
+        uploadedFile = new File([blob], 'sky.jpg', { type: 'image/jpeg' });
+      }, 'image/jpeg', 0.9);
+
+      document.getElementById('previewImg').src = e.target.result;
+      document.getElementById('preview').style.display = 'block';
+      document.getElementById('analyzeBtn').style.display = 'inline-block';
+      document.getElementById('results').style.display = 'none';
+      setStatus('');
+    };
+    img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
@@ -99,16 +122,14 @@ function setStatus(msg, isError = false) {
   el.className = isError ? 'error' : '';
 }
 
-// ── STEP 1: Login → get session key ──────────────────────
+// ── LOGIN ─────────────────────────────────────────────────
 async function getSession() {
   setStatus('Connecting to Astrometry.net...');
 
-  const formData = new FormData();
-  formData.append('request-json', JSON.stringify({ apikey: API_KEY }));
-
   const res = await fetch(`${BASE_URL}/login`, {
     method: 'POST',
-    body: formData
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apikey: API_KEY })
   });
 
   const data = await res.json();
@@ -121,6 +142,107 @@ async function getSession() {
   return data.session;
 }
 
+// ── UPLOAD IMAGE ──────────────────────────────────────────
+async function uploadImage(session) {
+  setStatus('Uploading image to Astrometry.net...');
+
+  const formData = new FormData();
+  formData.append('session', session);
+  formData.append('file', uploadedFile);
+
+  const res = await fetch(`${BASE_URL}/upload`, {
+    method: 'POST',
+    body: formData
+  });
+
+  const data = await res.json();
+  console.log('Upload response:', data);
+
+  if (data.status !== 'success') {
+    throw new Error('Image upload failed');
+  }
+
+  return data.subid;
+}
+
+// ── POLL SUBMISSION ───────────────────────────────────────
+async function pollSubmission(subid) {
+  setStatus('⏳ Astrometry.net is processing your image...');
+
+  while (true) {
+    const res = await fetch(`${BASE_URL}/submissions/${subid}`);
+    const data = await res.json();
+    console.log('Submission status:', data);
+
+    if (data.jobs && data.jobs.length > 0 && data.jobs[0] !== null) {
+      const jobid = data.jobs[0];
+      console.log('Job ID:', jobid);
+      return jobid;
+    }
+
+    await new Promise(r => setTimeout(r, 5000));
+  }
+}
+
+// ── GET RESULTS ───────────────────────────────────────────
+async function getResults(jobid) {
+  setStatus('🔍 Fetching star data...');
+
+  while (true) {
+    const res = await fetch(`${BASE_URL}/jobs/${jobid}`);
+    const data = await res.json();
+    console.log('Job status:', data);
+
+    if (data.status === 'success') break;
+    if (data.status === 'failure') throw new Error('Astrometry.net could not solve this image');
+
+    await new Promise(r => setTimeout(r, 5000));
+  }
+
+  const res = await fetch(`${BASE_URL}/jobs/${jobid}/info`);
+  const info = await res.json();
+  console.log('Results:', info);
+  return info;
+}
+
+// ── DISPLAY RESULTS ───────────────────────────────────────
+function displayResults(data) {
+  const constellations = [];
+  const stars = [];
+  const seen = new Set();
+
+  data.objects_in_field.forEach(item => {
+    const clean = item.trim();
+    if (!clean || seen.has(clean)) return;
+
+    if (clean.startsWith('Part of the constellation')) {
+      const name = clean.replace('Part of the constellation ', '');
+      if (!seen.has(name)) { constellations.push(name); seen.add(name); }
+    } else if (clean.startsWith('The star')) {
+      const name = clean.replace('The star ', '');
+      if (!seen.has(name)) { stars.push(name); seen.add(name); }
+    }
+  });
+
+  document.getElementById('constellationTags').innerHTML = constellations.map(c =>
+    `<span class="tag constellation">⭐ ${c}</span>`
+  ).join('');
+
+  document.getElementById('starTags').innerHTML = stars.map(s =>
+    `<span class="tag">${s}</span>`
+  ).join('');
+
+  const cal = data.calibration;
+  document.getElementById('calibrationData').innerHTML = `
+    <div class="cal-item"><span>Right Ascension</span><strong>${cal.ra.toFixed(4)}°</strong></div>
+    <div class="cal-item"><span>Declination</span><strong>${cal.dec.toFixed(4)}°</strong></div>
+    <div class="cal-item"><span>Radius</span><strong>${cal.radius.toFixed(2)}°</strong></div>
+  `;
+
+  document.getElementById('results').style.display = 'block';
+  document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 // ── ANALYZE BUTTON ────────────────────────────────────────
 async function analyze() {
   if (!uploadedFile) return;
@@ -129,8 +251,15 @@ async function analyze() {
     document.getElementById('analyzeBtn').disabled = true;
 
     const session = await getSession();
-    console.log('Session key:', session);
-    setStatus('✦ Connected! Session key received.');
+    const subid = await uploadImage(session);
+    console.log('Submission ID:', subid);
+
+    const jobid = await pollSubmission(subid);
+    const results = await getResults(jobid);
+
+    console.log('Final results:', results);
+    setStatus('✦ Stars identified!');
+    displayResults(results);
 
   } catch (err) {
     setStatus(err.message, true);

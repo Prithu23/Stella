@@ -10,14 +10,15 @@
 
     body {
       width: 100vw;
-      height: 100vh;
-      overflow: hidden;
+      min-height: 100vh;
+      overflow-y: auto;
       background: radial-gradient(ellipse at 60% 80%, #1a1f4e 0%, #0d0d1f 60%, #080810 100%);
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       font-family: 'Cormorant Garamond', serif;
+      padding: 60px 20px;
     }
 
     canvas {
@@ -34,6 +35,7 @@
       flex-direction: column;
       align-items: center;
       gap: 30px;
+      width: 100%;
     }
 
     h1 {
@@ -153,6 +155,90 @@
     #status.error {
       color: rgba(255, 120, 120, 0.8);
     }
+
+    #results {
+      display: none;
+      width: 540px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.04);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 30px;
+      margin-top: 10px;
+    }
+
+    #results h2 {
+      font-size: 0.75rem;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: rgba(200, 200, 220, 0.4);
+      margin-bottom: 20px;
+      font-weight: 400;
+    }
+
+    .result-section {
+      margin-bottom: 24px;
+    }
+
+    .result-section h3 {
+      font-size: 0.7rem;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: rgba(168, 216, 255, 0.6);
+      margin-bottom: 12px;
+      font-weight: 400;
+    }
+
+    .tag-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tag {
+      padding: 6px 14px;
+      border-radius: 50px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 0.78rem;
+      color: rgba(200, 200, 220, 0.75);
+      letter-spacing: 0.05em;
+    }
+
+    .tag.constellation {
+      border-color: rgba(168, 216, 255, 0.2);
+      color: rgba(168, 216, 255, 0.85);
+    }
+
+    .calibration-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+    }
+
+    .cal-item {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 12px;
+      padding: 12px;
+      text-align: center;
+    }
+
+    .cal-item span {
+      display: block;
+      font-size: 0.65rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: rgba(200,200,220,0.35);
+      margin-bottom: 4px;
+    }
+
+    .cal-item strong {
+      font-size: 0.85rem;
+      font-weight: 400;
+      color: rgba(200,200,220,0.8);
+    }
   </style>
 </head>
 <body>
@@ -181,12 +267,29 @@
     <button id="analyzeBtn" onclick="analyze()">✦ Analyze Stars</button>
 
     <p id="status"></p>
+
+    <div id="results">
+      <h2>✦ Analysis Results</h2>
+      <div class="result-section" id="constellationSection">
+        <h3>Constellations</h3>
+        <div class="tag-grid" id="constellationTags"></div>
+      </div>
+      <div class="result-section" id="starSection">
+        <h3>Stars Identified</h3>
+        <div class="tag-grid" id="starTags"></div>
+      </div>
+      <div class="result-section">
+        <h3>Sky Coordinates</h3>
+        <div class="calibration-grid" id="calibrationData"></div>
+      </div>
+    </div>
+
   </div>
 
   <script>
     // ── CONFIG ────────────────────────────────────────────────
     const API_KEY = 'ecmyfaicnzwwdmah';
-    const BASE_URL = 'https://corsproxy.io/?https://nova.astrometry.net/api';
+    const BASE_URL = 'http://127.0.0.1:5000';
 
     // ── STAR PARALLAX BACKGROUND ──────────────────────────────
     const canvas = document.getElementById('starCanvas');
@@ -266,13 +369,36 @@
     function previewImage(event) {
       const file = event.target.files[0];
       if (!file) return;
-      uploadedFile = file;
+
       const reader = new FileReader();
       reader.onload = function(e) {
-        document.getElementById('previewImg').src = e.target.result;
-        document.getElementById('preview').style.display = 'block';
-        document.getElementById('analyzeBtn').style.display = 'inline-block';
-        setStatus('');
+        const img = new Image();
+        img.onload = function() {
+          const canvas = document.createElement('canvas');
+          const maxSize = 1000;
+          let w = img.width;
+          let h = img.height;
+
+          if (w > maxSize || h > maxSize) {
+            if (w > h) { h = (h / w) * maxSize; w = maxSize; }
+            else { w = (w / h) * maxSize; h = maxSize; }
+          }
+
+          canvas.width = w;
+          canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+
+          canvas.toBlob(blob => {
+            uploadedFile = new File([blob], 'sky.jpg', { type: 'image/jpeg' });
+          }, 'image/jpeg', 0.9);
+
+          document.getElementById('previewImg').src = e.target.result;
+          document.getElementById('preview').style.display = 'block';
+          document.getElementById('analyzeBtn').style.display = 'inline-block';
+          document.getElementById('results').style.display = 'none';
+          setStatus('');
+        };
+        img.src = e.target.result;
       };
       reader.readAsDataURL(file);
     }
@@ -285,16 +411,14 @@
       el.className = isError ? 'error' : '';
     }
 
-    // ── LOGIN → get session key ───────────────────────────────
+    // ── LOGIN ─────────────────────────────────────────────────
     async function getSession() {
       setStatus('Connecting to Astrometry.net...');
 
-      const formData = new FormData();
-      formData.append('request-json', JSON.stringify({ apikey: API_KEY }));
-
       const res = await fetch(`${BASE_URL}/login`, {
         method: 'POST',
-        body: formData
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apikey: API_KEY })
       });
 
       const data = await res.json();
@@ -307,15 +431,125 @@
       return data.session;
     }
 
+    // ── UPLOAD IMAGE ──────────────────────────────────────────
+    async function uploadImage(session) {
+      setStatus('Uploading image to Astrometry.net...');
+
+      const formData = new FormData();
+      formData.append('session', session);
+      formData.append('file', uploadedFile);
+
+      const res = await fetch(`${BASE_URL}/upload`, {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await res.json();
+      console.log('Upload response:', data);
+
+      if (data.status !== 'success') {
+        throw new Error('Image upload failed');
+      }
+
+      return data.subid;
+    }
+
+    // ── POLL SUBMISSION ───────────────────────────────────────
+    async function pollSubmission(subid) {
+      setStatus('⏳ Astrometry.net is processing your image...');
+
+      while (true) {
+        const res = await fetch(`${BASE_URL}/submissions/${subid}`);
+        const data = await res.json();
+        console.log('Submission status:', data);
+
+        if (data.jobs && data.jobs.length > 0 && data.jobs[0] !== null) {
+          const jobid = data.jobs[0];
+          console.log('Job ID:', jobid);
+          return jobid;
+        }
+
+        await new Promise(r => setTimeout(r, 5000));
+      }
+    }
+
+    // ── GET RESULTS ───────────────────────────────────────────
+    async function getResults(jobid) {
+      setStatus('🔍 Fetching star data...');
+
+      while (true) {
+        const res = await fetch(`${BASE_URL}/jobs/${jobid}`);
+        const data = await res.json();
+        console.log('Job status:', data);
+
+        if (data.status === 'success') break;
+        if (data.status === 'failure') throw new Error('Astrometry.net could not solve this image');
+
+        await new Promise(r => setTimeout(r, 5000));
+      }
+
+      const res = await fetch(`${BASE_URL}/jobs/${jobid}/info`);
+      const info = await res.json();
+      console.log('Results:', info);
+      return info;
+    }
+
+    // ── DISPLAY RESULTS ───────────────────────────────────────
+    function displayResults(data) {
+      const constellations = [];
+      const stars = [];
+      const seen = new Set();
+
+      data.objects_in_field.forEach(item => {
+        const clean = item.trim();
+        if (!clean || seen.has(clean)) return;
+
+        if (clean.startsWith('Part of the constellation')) {
+          const name = clean.replace('Part of the constellation ', '');
+          if (!seen.has(name)) { constellations.push(name); seen.add(name); }
+        } else if (clean.startsWith('The star')) {
+          const name = clean.replace('The star ', '');
+          if (!seen.has(name)) { stars.push(name); seen.add(name); }
+        }
+      });
+
+      document.getElementById('constellationTags').innerHTML = constellations.map(c =>
+        `<span class="tag constellation">⭐ ${c}</span>`
+      ).join('');
+
+      document.getElementById('starTags').innerHTML = stars.map(s =>
+        `<span class="tag">${s}</span>`
+      ).join('');
+
+      const cal = data.calibration;
+      document.getElementById('calibrationData').innerHTML = `
+        <div class="cal-item"><span>Right Ascension</span><strong>${cal.ra.toFixed(4)}°</strong></div>
+        <div class="cal-item"><span>Declination</span><strong>${cal.dec.toFixed(4)}°</strong></div>
+        <div class="cal-item"><span>Radius</span><strong>${cal.radius.toFixed(2)}°</strong></div>
+      `;
+
+      document.getElementById('results').style.display = 'block';
+      document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
     // ── ANALYZE BUTTON ────────────────────────────────────────
     async function analyze() {
       if (!uploadedFile) return;
 
       try {
         document.getElementById('analyzeBtn').disabled = true;
+
         const session = await getSession();
-        console.log('Session key:', session);
-        setStatus('✦ Connected! Session key received.');
+        const subid = await uploadImage(session);
+        console.log('Submission ID:', subid);
+
+        const jobid = await pollSubmission(subid);
+        const results = await getResults(jobid);
+
+        console.log('Final results:', results);
+        setStatus('✦ Stars identified!');
+        displayResults(results);
+
       } catch (err) {
         setStatus(err.message, true);
       } finally {
