@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Stella</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&display=swap" rel="stylesheet"/>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: radial-gradient(ellipse at 60% 80%, #1a1f4e 0%, #0d0d1f 60%, #080810 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Cormorant Garamond', serif;
+    }
+
+    canvas {
+      position: fixed;
+      top: 0; left: 0;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    .content {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 30px;
+    }
+
+    h1 {
+      font-size: 5rem;
+      font-weight: 300;
+      letter-spacing: 0.35em;
+      color: #e8e8f0;
+      text-transform: uppercase;
+      text-shadow: 0 0 40px rgba(180, 180, 255, 0.3);
+    }
+
+    .upload-bar {
+      display: flex;
+      align-items: center;
+      width: 540px;
+      height: 64px;
+      border-radius: 50px;
+      background: rgba(255, 255, 255, 0.04);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      cursor: pointer;
+      transition: border-color 0.3s, background 0.3s;
+      overflow: hidden;
+    }
+
+    .upload-bar:hover {
+      background: rgba(255, 255, 255, 0.07);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .icon-pill {
+      width: 80px;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.07);
+      border-radius: 50px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .icon-pill svg {
+      width: 28px;
+      height: 28px;
+      stroke: #c8c8e0;
+      fill: none;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .upload-bar span {
+      flex: 1;
+      text-align: center;
+      letter-spacing: 0.2em;
+      font-size: 0.85rem;
+      color: rgba(200, 200, 220, 0.7);
+      text-transform: uppercase;
+      font-weight: 400;
+      padding-right: 20px;
+    }
+
+    input[type="file"] { display: none; }
+
+    #preview {
+      display: none;
+      width: 400px;
+      height: 250px;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    #preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      border-radius: 16px;
+    }
+
+    #analyzeBtn {
+      display: none;
+      padding: 14px 48px;
+      border-radius: 50px;
+      background: rgba(255,255,255,0.04);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: rgba(200,200,220,0.85);
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 0.9rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    #analyzeBtn:hover {
+      background: rgba(255,255,255,0.08);
+      border-color: rgba(255,255,255,0.3);
+    }
+
+    #analyzeBtn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    #status {
+      display: none;
+      color: rgba(200, 200, 220, 0.6);
+      font-size: 0.85rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+    }
+
+    #status.error {
+      color: rgba(255, 120, 120, 0.8);
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="starCanvas"></canvas>
+
+  <div class="content">
+    <h1>Stella</h1>
+
+    <div class="upload-bar" onclick="document.getElementById('fileInput').click()">
+      <div class="icon-pill">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 16V8m0 0l-3 3m3-3l3 3"/>
+          <path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/>
+        </svg>
+      </div>
+      <span>Upload a picture of the sky</span>
+    </div>
+
+    <input type="file" id="fileInput" accept="image/*" onchange="previewImage(event)" />
+
+    <div id="preview">
+      <img id="previewImg" src="" alt="Preview" />
+    </div>
+
+    <button id="analyzeBtn" onclick="analyze()">✦ Analyze Stars</button>
+
+    <p id="status"></p>
+  </div>
+
+  <script>
+    // ── CONFIG ────────────────────────────────────────────────
+    const API_KEY = 'ecmyfaicnzwwdmah';
+    const BASE_URL = 'https://corsproxy.io/?https://nova.astrometry.net/api';
+
+    // ── STAR PARALLAX BACKGROUND ──────────────────────────────
+    const canvas = document.getElementById('starCanvas');
+    const ctx = canvas.getContext('2d');
+
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    window.addEventListener('resize', () => {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+      initStars();
+    });
+
+    let mouse  = { x: 0, y: 0 };
+    let target = { x: 0, y: 0 };
+
+    window.addEventListener('mousemove', (e) => {
+      target.x = (e.clientX / window.innerWidth)  - 0.5;
+      target.y = (e.clientY / window.innerHeight) - 0.5;
+    });
+
+    const layers = [
+      { count: 180, strength: 18,  minSize: 0.4, maxSize: 0.9, minOp: 0.3, maxOp: 0.6 },
+      { count: 100, strength: 38,  minSize: 0.8, maxSize: 1.4, minOp: 0.5, maxOp: 0.8 },
+      { count:  40, strength: 65,  minSize: 1.2, maxSize: 2.2, minOp: 0.7, maxOp: 1.0 },
+    ];
+
+    let stars = [];
+
+    function initStars() {
+      stars = [];
+      layers.forEach(layer => {
+        for (let i = 0; i < layer.count; i++) {
+          stars.push({
+            x:             Math.random(),
+            y:             Math.random(),
+            size:          layer.minSize + Math.random() * (layer.maxSize - layer.minSize),
+            opacity:       layer.minOp  + Math.random() * (layer.maxOp  - layer.minOp),
+            twinkleSpeed:  0.005 + Math.random() * 0.01,
+            twinkleOffset: Math.random() * Math.PI * 2,
+            strength:      layer.strength,
+          });
+        }
+      });
+    }
+
+    function drawStars() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const time = Date.now() * 0.001;
+      stars.forEach(star => {
+        const ox = mouse.x * star.strength;
+        const oy = mouse.y * star.strength;
+        const px = star.x * canvas.width  + ox;
+        const py = star.y * canvas.height + oy;
+        const twinkle = star.opacity * (0.7 + 0.3 * Math.sin(time * star.twinkleSpeed * 60 + star.twinkleOffset));
+        ctx.beginPath();
+        ctx.arc(px, py, star.size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(220, 220, 255, ${twinkle})`;
+        ctx.fill();
+      });
+    }
+
+    function animate() {
+      mouse.x += (target.x - mouse.x) * 0.1;
+      mouse.y += (target.y - mouse.y) * 0.1;
+      drawStars();
+      requestAnimationFrame(animate);
+    }
+
+    initStars();
+    animate();
+
+    // ── IMAGE PREVIEW ─────────────────────────────────────────
+    let uploadedFile = null;
+
+    function previewImage(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      uploadedFile = file;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        document.getElementById('previewImg').src = e.target.result;
+        document.getElementById('preview').style.display = 'block';
+        document.getElementById('analyzeBtn').style.display = 'inline-block';
+        setStatus('');
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // ── STATUS HELPER ─────────────────────────────────────────
+    function setStatus(msg, isError = false) {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.style.display = msg ? 'block' : 'none';
+      el.className = isError ? 'error' : '';
+    }
+
+    // ── LOGIN → get session key ───────────────────────────────
+    async function getSession() {
+      setStatus('Connecting to Astrometry.net...');
+
+      const formData = new FormData();
+      formData.append('request-json', JSON.stringify({ apikey: API_KEY }));
+
+      const res = await fetch(`${BASE_URL}/login`, {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await res.json();
+      console.log('Login response:', data);
+
+      if (data.status !== 'success') {
+        throw new Error('Login failed — check your API key');
+      }
+
+      return data.session;
+    }
+
+    // ── ANALYZE BUTTON ────────────────────────────────────────
+    async function analyze() {
+      if (!uploadedFile) return;
+
+      try {
+        document.getElementById('analyzeBtn').disabled = true;
+        const session = await getSession();
+        console.log('Session key:', session);
+        setStatus('✦ Connected! Session key received.');
+      } catch (err) {
+        setStatus(err.message, true);
+      } finally {
+        document.getElementById('analyzeBtn').disabled = false;
+      }
+    }
+  </script>
+
+</body>
+</html>
